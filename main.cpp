@@ -11,28 +11,15 @@
 using namespace glm;
 
 #ifndef VERSION_MAJOR
-	#define VERSION_MAJOR 1
+	#define VERSION_MAJOR 2
 #endif
 
 #ifndef VERSION_MINOR
-	#define VERSION_MINOR 1
+	#define VERSION_MINOR 0
 #endif
 
 #define USE_NORMALS (VERSION_MAJOR * 100 + VERSION_MINOR) >= 101 // is version greater or equal to 1.1?
-
-#ifndef IS_INDEX_SIZE_SHORT
-	#define IS_INDEX_SIZE_SHORT 0
-#endif
-
-#ifndef AQUA_READABLE
-	#define AQUA_READABLE 0
-#endif
-
-#if IS_INDEX_SIZE_SHORT /// THIS IS AUTOMATICALLY MANAGED, DO NOT TOUCH
-	#define INDEX_TYPE uint16_t
-#else
-	#define INDEX_TYPE uint32_t
-#endif
+#define MAX_ATTRIBUTE_COUNT 8
 
 bool load_obj(const char* path, char* name, std::vector<glm::vec3>& out_vertices, std::vector<glm::vec2>& out_coords, std::vector<glm::vec3>& out_normals) {
 	std::vector<uint32_t> vertex_indices;
@@ -126,18 +113,18 @@ bool is_near(float x, float y) {
 	return fabs(x - y) < 0.01f;
 }
 
-struct packed_vertex {
+struct packed_vertex_s {
 	glm::vec3 vertex;
 	glm::vec2 coords;
 	glm::vec3 normal;
 	
-	bool operator < (const packed_vertex that) const {
-		return memcpy((void*) this, (void*) &that, sizeof(packed_vertex)) > 0;
+	bool operator < (const packed_vertex_s that) const {
+		return memcpy((void*) this, (void*) &that, sizeof(packed_vertex_s)) > 0;
 	};
 };
 
-bool get_similar_vertex_index(packed_vertex& packed, std::map<packed_vertex, INDEX_TYPE>& vertex_to_out_index, INDEX_TYPE& result) {
-	std::map<packed_vertex, INDEX_TYPE>::iterator iter = vertex_to_out_index.find(packed);
+bool get_similar_vertex_index(packed_vertex_s& packed, std::map<packed_vertex_s, uint32_t>& vertex_to_out_index, uint32_t& result) {
+	std::map<packed_vertex_s, uint32_t>::iterator iter = vertex_to_out_index.find(packed);
 	
 	if (iter == vertex_to_out_index.end()) {
 		return false;
@@ -148,12 +135,12 @@ bool get_similar_vertex_index(packed_vertex& packed, std::map<packed_vertex, IND
 	}
 }
 
-void index_vbo(std::vector<glm::vec3>& in_vertices, std::vector<glm::vec2>& in_coords, std::vector<glm::vec3>& in_normals, std::vector<INDEX_TYPE>& out_indices, std::vector<glm::vec3>& out_vertices, std::vector<glm::vec2>& out_coords, std::vector<glm::vec3>& out_normals) {
-	std::map<packed_vertex, INDEX_TYPE> vertex_to_out_index;
+void index_vbo(std::vector<glm::vec3>& in_vertices, std::vector<glm::vec2>& in_coords, std::vector<glm::vec3>& in_normals, std::vector<uint32_t>& out_indices, std::vector<glm::vec3>& out_vertices, std::vector<glm::vec2>& out_coords, std::vector<glm::vec3>& out_normals) {
+	std::map<packed_vertex_s, uint32_t> vertex_to_out_index;
 	
 	for (uint32_t i = 0; i < in_vertices.size(); i++) {
-		packed_vertex packed = { .vertex = in_vertices[i], .coords = in_coords[i], .normal = in_normals[i] };
-		INDEX_TYPE index;
+		packed_vertex_s packed = { .vertex = in_vertices[i], .coords = in_coords[i], .normal = in_normals[i] };
+		uint32_t index;
 		
 		if (get_similar_vertex_index(packed, vertex_to_out_index, index)) {
 			out_indices.push_back(index);
@@ -163,42 +150,39 @@ void index_vbo(std::vector<glm::vec3>& in_vertices, std::vector<glm::vec2>& in_c
 			out_coords  .push_back(in_coords  [i]);
 			out_normals .push_back(in_normals [i]);
 			
-			INDEX_TYPE new_index = (INDEX_TYPE) out_vertices.size() - 1;
+			uint32_t new_index = (uint32_t) out_vertices.size() - 1;
 			out_indices.push_back(new_index);
 			vertex_to_out_index[packed] = new_index;
 		}
 	}
 }
 
+typedef struct { // vertex attribute header
+	uint64_t components;
+	uint64_t offset;
+} ivx_attribute_header_t;
+
 typedef struct { // header
 	uint64_t version_major;
 	uint64_t version_minor;
-	uint64_t is_index_size_short;
 	uint8_t  name[1024];
 	
-	uint64_t vertex_count;
-	uint64_t coords_count;
-	uint64_t  index_count;
+	uint64_t index_count;
+	uint64_t index_offset;
 	
-	uint64_t vertex_bytes; // size of a single element
-	uint64_t coords_bytes;
-	uint64_t  index_bytes;
-	
-	#if USE_NORMALS // is above or equal to version 1.1?
-		uint64_t normal_count;
-		uint64_t normal_bytes;
-	#endif
+	ivx_attribute_header_t attributes[MAX_ATTRIBUTE_COUNT];
 } ivx_header_t;
+
+typedef struct { float x; float y; float z; } ivx_vec3_t;
+typedef struct { float x; float y;          } ivx_vec2_t;
 
 int main(int argc, char* argv[]) {
 	printf("Wavefront OBJ to Inobulles IVX file converter v%d.%d\n", VERSION_MAJOR, VERSION_MINOR);
 	
-	#if !AQUA_READABLE
-		if (sizeof(float) != 4) {
-			printf("ERROR IVX uses 32 bit floats when AQUA_READABLE is not set. Your platform does not seem to support 32 bit floats\n");
-			return 1;
-		}
-	#endif
+	if (sizeof(float) != 4) {
+		printf("ERROR IVX uses 32 bit floats. Your platform does not seem to support 32 bit floats\n");
+		return 1;
+	}
 	
 	if (argc < 2) {
 		printf("ERROR You must specify which Wavefront file you want to convert\n");
@@ -213,15 +197,14 @@ int main(int argc, char* argv[]) {
 	std::vector<glm::vec2> coords;
 	std::vector<glm::vec3> normals;
 	
-	ivx_header_t ivx;
-	memset(&ivx, 0, sizeof(ivx));
-	ivx.is_index_size_short = IS_INDEX_SIZE_SHORT;
+	ivx_header_t ivx_header;
+	memset(&ivx_header, 0, sizeof(ivx_header));
 	
-	ivx.version_major = VERSION_MAJOR;
-	ivx.version_minor = VERSION_MINOR;
+	ivx_header.version_major = VERSION_MAJOR;
+	ivx_header.version_minor = VERSION_MINOR;
 	
 	printf("Opening OBJ file (%s) ...\n", argv[1]);
-	if (load_obj(argv[1], (char*) ivx.name, vertices, coords, normals)) {
+	if (load_obj(argv[1], (char*) ivx_header.name, vertices, coords, normals)) {
 		printf("ERROR An error occured while attempting to read OBJ file\n");
 		return 1;
 		
@@ -233,41 +216,12 @@ int main(int argc, char* argv[]) {
 	std::vector<glm::vec2> indexed_coords;
 	std::vector<glm::vec3> indexed_normals;
 	
-	std::vector<INDEX_TYPE> indices;
+	std::vector<uint32_t> indices;
 	index_vbo(vertices, coords, normals, indices, indexed_vertices, indexed_coords, indexed_normals);
+	ivx_header.index_count = indices.size();
 	
 	const char* ivx_path = argc > 2 ? argv[2] : "output.ivx";
 	printf("OBJ file indexed, writing to IVX file (%s) ...\n", ivx_path);
-	
-	ivx.vertex_count = indexed_vertices.size();
-	ivx.coords_count = indexed_coords  .size();
-	ivx. index_count = indices         .size();
-	
-	#if USE_NORMALS
-		ivx.normal_count = indexed_normals.size();
-	#endif
-	
-	#if AQUA_READABLE
-		#define convert_float(x) ((uint64_t) (x * 1000000))
-		
-		typedef struct { uint64_t x; uint64_t y; uint64_t z; } ivx_vertex_t;
-		typedef struct { uint64_t x; uint64_t y;             } ivx_coords_t;
-		typedef struct { uint64_t x; uint64_t y; uint64_t z; } ivx_normal_t;
-	#else
-		#define convert_float(x) (x)
-		
-		typedef struct { float x; float y; float z; } ivx_vertex_t;
-		typedef struct { float x; float y;          } ivx_coords_t;
-		typedef struct { float x; float y; float z; } ivx_normal_t;
-	#endif
-	
-	ivx.vertex_bytes = sizeof(ivx_vertex_t);
-	ivx.coords_bytes = sizeof(ivx_coords_t);
-	ivx. index_bytes = ivx.is_index_size_short ? sizeof(uint16_t) : sizeof(uint32_t);
-	
-	#if USE_NORMALS
-		ivx.normal_bytes = sizeof(ivx_normal_t);
-	#endif
 	
 	FILE* ivx_file = fopen(ivx_path, "wb");
 	if (ivx_file == NULL) {
@@ -275,33 +229,51 @@ int main(int argc, char* argv[]) {
 		return 1;
 	}
 	
-	fwrite(&ivx, 1, sizeof(ivx), ivx_file);
+	fwrite(&ivx_header, 1, sizeof(ivx_header), ivx_file); // leave space for writing the header later
 	
-	for (uint64_t i = 0; i < ivx.vertex_count; i++) {
-		ivx_vertex_t data = { convert_float(indexed_vertices[i].x), convert_float(indexed_vertices[i].y), convert_float(indexed_vertices[i].z) };
+	// write indices
+	
+	ivx_header.index_offset = ftell(ivx_file);
+	for (uint32_t i = 0; i < ivx_header.index_count; i++) {
+		uint32_t data = indices[i];
 		fwrite(&data, 1, sizeof(data), ivx_file);
-		
-	} for (uint64_t i = 0; i < ivx.coords_count; i++) {
-		ivx_coords_t data = { convert_float(indexed_coords[i].x), convert_float(indexed_coords[i].y) };
-		fwrite(&data, 1, sizeof(data), ivx_file);
-		
-	} for (uint64_t i = 0; i < ivx.index_count; i++) {
-		if (ivx.is_index_size_short) {
-			uint16_t data = indices[i];
-			fwrite(&data, 1, sizeof(data), ivx_file);
-			
-		} else {
-			uint32_t data = indices[i];
-			fwrite(&data, 1, sizeof(data), ivx_file);
-		}
 	}
 	
-	#if USE_NORMALS
-		for (uint64_t i = 0; i < ivx.normal_count; i++) {
-			ivx_normal_t data = { convert_float(indexed_normals[i].x), convert_float(indexed_normals[i].y), convert_float(indexed_normals[i].z) };
-			fwrite(&data, 1, sizeof(data), ivx_file);
-		}
-	#endif
+	// write vertex attribute
+	
+	ivx_header.attributes[0].components = 3;
+	ivx_header.attributes[0].offset = ftell(ivx_file);
+	
+	for (uint64_t i = 0; i < indexed_vertices.size(); i++) {
+		ivx_vec3_t data = { indexed_vertices[i].x, indexed_vertices[i].y, indexed_vertices[i].z };
+		fwrite(&data, 1, sizeof(data), ivx_file);
+	}
+	
+	// write texture coord attribute
+	
+	ivx_header.attributes[1].components = 2;
+	ivx_header.attributes[1].offset = ftell(ivx_file);
+	
+	for (uint64_t i = 0; i < indexed_coords.size(); i++) {
+		ivx_vec2_t data = { indexed_coords[i].x, indexed_coords[i].y };
+		fwrite(&data, 1, sizeof(data), ivx_file);
+		
+	}
+	
+	// write normal attribute
+	
+	ivx_header.attributes[2].components = 3;
+	ivx_header.attributes[2].offset = ftell(ivx_file);
+	
+	for (uint64_t i = 0; i < indexed_normals.size(); i++) {
+		ivx_vec3_t data = { indexed_normals[i].x, indexed_normals[i].y, indexed_normals[i].z };
+		fwrite(&data, 1, sizeof(data), ivx_file);
+	}
+	
+	// go back and write the header
+	
+	rewind(ivx_file);
+	fwrite(&ivx_header, 1, sizeof(ivx_header), ivx_file);
 	
 	printf("Finished converting successfully\n");
 	
