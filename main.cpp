@@ -61,9 +61,9 @@ bool load_obj(const char* path, char* name, std::vector<glm::vec3>& out_vertices
 				return true;
 			}
 			
-			out_indices.push_back(vertex_index[0]);
-			out_indices.push_back(vertex_index[1]);
-			out_indices.push_back(vertex_index[2]);
+			out_indices.push_back(vertex_index[0] - 1);
+			out_indices.push_back(vertex_index[1] - 1);
+			out_indices.push_back(vertex_index[2] - 1);
 			
 		} else {
 			char temp[1024];
