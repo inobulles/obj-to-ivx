@@ -51,7 +51,6 @@ bool load_obj(const char* path, char* name, std::vector<glm::vec3>& out_vertices
 		} else if (strcmp(line_header, "vt") == 0) {
 			glm::vec2 coords;
 			fscanf(file, "%f %f\n", &coords.x, &coords.y);
-			coords.y = 1.0f - coords.y;
 			temp_coords.push_back(coords);
 			
 		} else if (strcmp(line_header, "f") == 0) { // only works for triangles
