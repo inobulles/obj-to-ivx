@@ -22,14 +22,12 @@ using namespace glm;
 #define USE_NORMALS (VERSION_MAJOR * 100 + VERSION_MINOR) >= 101 // is version greater or equal to 1.1?
 #define MAX_ATTRIBUTE_COUNT 8
 
-bool load_obj(const char* path, char* name, std::vector<glm::vec3>& out_vertices, std::vector<glm::vec2>& out_coords, std::vector<glm::vec3>& out_normals) {
+bool load_obj(const char* path, char* name, std::vector<glm::vec3>& out_vertices, std::vector<glm::vec2>& out_coords) {
 	std::vector<uint32_t> vertex_indices;
 	std::vector<uint32_t> coords_indices;
-	std::vector<uint32_t> normal_indices;
 	
 	std::vector<glm::vec3> temp_vertices;
 	std::vector<glm::vec2> temp_coords;
-	std::vector<glm::vec3> temp_normals;
 	
 	FILE* file = fopen(path, "r");
 	if (file == NULL) {
@@ -56,11 +54,6 @@ bool load_obj(const char* path, char* name, std::vector<glm::vec3>& out_vertices
 			coords.y = 1.0f - coords.y;
 			temp_coords.push_back(coords);
 			
-		} else if (strcmp(line_header, "vn") == 0) {
-			glm::vec3 normal;
-			fscanf(file, "%f %f %f\n", &normal.x, &normal.y, &normal.z);
-			temp_normals.push_back(normal);
-			
 		} else if (strcmp(line_header, "f") == 0) { // only works for triangles
 			std::string vertex1;
 			std::string vertex2;
@@ -68,9 +61,8 @@ bool load_obj(const char* path, char* name, std::vector<glm::vec3>& out_vertices
 			
 			uint32_t vertex_index[3];
 			uint32_t coords_index[3];
-			uint32_t normal_index[3];
 			
-			if (fscanf(file, "%d/%d/%d %d/%d/%d %d/%d/%d\n", &vertex_index[0], &coords_index[0], &normal_index[0], &vertex_index[1], &coords_index[1], &normal_index[1], &vertex_index[2], &coords_index[2], &normal_index[2]) != 9) {
+			if (fscanf(file, "%d/%d %d/%d %d/%d\n", &vertex_index[0], &coords_index[0], &vertex_index[1], &coords_index[1], &vertex_index[2], &coords_index[2]) != 6) {
 				printf("ERROR OBJ file could not be read, try exporting with different options\n");
 				return true;
 			}
@@ -83,10 +75,6 @@ bool load_obj(const char* path, char* name, std::vector<glm::vec3>& out_vertices
 			coords_indices.push_back(coords_index[1]);
 			coords_indices.push_back(coords_index[2]);
 			
-			normal_indices.push_back(normal_index[0]);
-			normal_indices.push_back(normal_index[1]);
-			normal_indices.push_back(normal_index[2]);
-			
 		} else {
 			char temp[1024];
 			fgets(temp, sizeof(temp), file);
@@ -96,15 +84,12 @@ bool load_obj(const char* path, char* name, std::vector<glm::vec3>& out_vertices
 	for (uint32_t i = 0; i < vertex_indices.size(); i++) {
 		uint32_t vertex_index = vertex_indices[i];
 		uint32_t coords_index = coords_indices[i];
-		uint32_t normal_index = normal_indices[i];
 		
 		glm::vec3 vertex = temp_vertices[vertex_index - 1];
 		glm::vec2 coords = temp_coords  [coords_index - 1];
-		glm::vec3 normal = temp_normals [normal_index - 1];
 		
 		out_vertices.push_back(vertex);
 		out_coords  .push_back(coords);
-		out_normals .push_back(normal);
 	}
 	
 	return false;
@@ -117,7 +102,6 @@ bool is_near(float x, float y) {
 struct packed_vertex_s {
 	glm::vec3 vertex;
 	glm::vec2 coords;
-	glm::vec3 normal;
 	
 	bool operator < (const packed_vertex_s that) const {
 		return memcpy((void*) this, (void*) &that, sizeof(packed_vertex_s)) > 0;
@@ -136,11 +120,11 @@ bool get_similar_vertex_index(packed_vertex_s& packed, std::map<packed_vertex_s,
 	}
 }
 
-void index_vbo(std::vector<glm::vec3>& in_vertices, std::vector<glm::vec2>& in_coords, std::vector<glm::vec3>& in_normals, std::vector<uint32_t>& out_indices, std::vector<glm::vec3>& out_vertices, std::vector<glm::vec2>& out_coords, std::vector<glm::vec3>& out_normals) {
+void index_vbo(std::vector<glm::vec3>& in_vertices, std::vector<glm::vec2>& in_coords, std::vector<uint32_t>& out_indices, std::vector<glm::vec3>& out_vertices, std::vector<glm::vec2>& out_coords) {
 	std::map<packed_vertex_s, uint32_t> vertex_to_out_index;
 	
 	for (uint32_t i = 0; i < in_vertices.size(); i++) {
-		packed_vertex_s packed = { .vertex = in_vertices[i], .coords = in_coords[i], .normal = in_normals[i] };
+		packed_vertex_s packed = { .vertex = in_vertices[i], .coords = in_coords[i] };
 		uint32_t index;
 		
 		if (get_similar_vertex_index(packed, vertex_to_out_index, index)) {
@@ -149,7 +133,6 @@ void index_vbo(std::vector<glm::vec3>& in_vertices, std::vector<glm::vec2>& in_c
 		} else {
 			out_vertices.push_back(in_vertices[i]);
 			out_coords  .push_back(in_coords  [i]);
-			out_normals .push_back(in_normals [i]);
 			
 			uint32_t new_index = (uint32_t) out_vertices.size() - 1;
 			out_indices.push_back(new_index);
@@ -196,7 +179,6 @@ int main(int argc, char* argv[]) {
 	
 	std::vector<glm::vec3> vertices;
 	std::vector<glm::vec2> coords;
-	std::vector<glm::vec3> normals;
 	
 	ivx_header_t ivx_header;
 	memset(&ivx_header, 0, sizeof(ivx_header));
@@ -205,7 +187,7 @@ int main(int argc, char* argv[]) {
 	ivx_header.version_minor = VERSION_MINOR;
 	
 	printf("Opening OBJ file (%s) ...\n", argv[1]);
-	if (load_obj(argv[1], (char*) ivx_header.name, vertices, coords, normals)) {
+	if (load_obj(argv[1], (char*) ivx_header.name, vertices, coords)) {
 		printf("ERROR An error occured while attempting to read OBJ file\n");
 		return 1;
 		
@@ -215,10 +197,9 @@ int main(int argc, char* argv[]) {
 	
 	std::vector<glm::vec3> indexed_vertices;
 	std::vector<glm::vec2> indexed_coords;
-	std::vector<glm::vec3> indexed_normals;
 	
 	std::vector<uint32_t> indices;
-	index_vbo(vertices, coords, normals, indices, indexed_vertices, indexed_coords, indexed_normals);
+	index_vbo(vertices, coords, indices, indexed_vertices, indexed_coords);
 	ivx_header.index_count = indices.size();
 	
 	const char* ivx_path = argc > 2 ? argv[2] : "output.ivx";
@@ -259,16 +240,6 @@ int main(int argc, char* argv[]) {
 		ivx_vec2_t data = { indexed_coords[i].x, indexed_coords[i].y };
 		fwrite(&data, 1, sizeof(data), ivx_file);
 		
-	}
-	
-	// write normal attribute
-	
-	ivx_header.attributes[2].components = 3;
-	ivx_header.attributes[2].offset = ftell(ivx_file);
-	
-	for (uint64_t i = 0; i < indexed_normals.size(); i++) {
-		ivx_vec3_t data = { indexed_normals[i].x, indexed_normals[i].y, indexed_normals[i].z };
-		fwrite(&data, 1, sizeof(data), ivx_file);
 	}
 	
 	// go back and write the header
