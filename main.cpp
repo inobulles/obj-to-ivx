@@ -16,7 +16,7 @@ using namespace glm;
 #endif
 
 #ifndef VERSION_MINOR
-	#define VERSION_MINOR 0
+	#define VERSION_MINOR 1
 #endif
 
 #define USE_NORMALS (VERSION_MAJOR * 100 + VERSION_MINOR) >= 101 // is version greater or equal to 1.1?
@@ -154,6 +154,7 @@ typedef struct { // header
 	uint64_t index_count;
 	uint64_t index_offset;
 	
+	uint64_t vertex_count;
 	ivx_attribute_header_t attributes[MAX_ATTRIBUTE_COUNT];
 } ivx_header_t;
 
@@ -200,6 +201,8 @@ int main(int argc, char* argv[]) {
 	
 	std::vector<uint32_t> indices;
 	index_vbo(vertices, coords, indices, indexed_vertices, indexed_coords);
+
+	ivx_header.vertex_count = indexed_vertices.size();
 	ivx_header.index_count = indices.size();
 	
 	const char* ivx_path = argc > 2 ? argv[2] : "output.ivx";
