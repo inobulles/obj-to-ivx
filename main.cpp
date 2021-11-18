@@ -22,13 +22,7 @@ using namespace glm;
 #define USE_NORMALS (VERSION_MAJOR * 100 + VERSION_MINOR) >= 101 // is version greater or equal to 1.1?
 #define MAX_ATTRIBUTE_COUNT 8
 
-bool load_obj(const char* path, char* name, std::vector<glm::vec3>& out_vertices, std::vector<glm::vec2>& out_coords) {
-	std::vector<uint32_t> vertex_indices;
-	std::vector<uint32_t> coords_indices;
-	
-	std::vector<glm::vec3> temp_vertices;
-	std::vector<glm::vec2> temp_coords;
-	
+bool load_obj(const char* path, char* name, std::vector<glm::vec3>& out_vertices, std::vector<glm::vec2>& out_coords, std::vector<uint32_t>& out_indices) {
 	FILE* file = fopen(path, "r");
 	if (file == NULL) {
 		printf("ERROR Failed to open OBJ file\n");
@@ -46,12 +40,13 @@ bool load_obj(const char* path, char* name, std::vector<glm::vec3>& out_vertices
 		} else if (strcmp(line_header, "v") == 0) {
 			glm::vec3 vertex;
 			fscanf(file, "%f %f %f\n", &vertex.x, &vertex.y, &vertex.z);
-			temp_vertices.push_back(vertex);
+			printf("v %f %f %f\n", vertex.x, vertex.y, vertex.z);
+			out_vertices.push_back(vertex);
 			
 		} else if (strcmp(line_header, "vt") == 0) {
 			glm::vec2 coords;
 			fscanf(file, "%f %f\n", &coords.x, &coords.y);
-			temp_coords.push_back(coords);
+			out_coords.push_back(coords);
 			
 		} else if (strcmp(line_header, "f") == 0) { // only works for triangles
 			std::string vertex1;
@@ -66,36 +61,21 @@ bool load_obj(const char* path, char* name, std::vector<glm::vec3>& out_vertices
 				return true;
 			}
 			
-			vertex_indices.push_back(vertex_index[0]);
-			vertex_indices.push_back(vertex_index[1]);
-			vertex_indices.push_back(vertex_index[2]);
-			
-			coords_indices.push_back(coords_index[0]);
-			coords_indices.push_back(coords_index[1]);
-			coords_indices.push_back(coords_index[2]);
+			out_indices.push_back(vertex_index[0]);
+			out_indices.push_back(vertex_index[1]);
+			out_indices.push_back(vertex_index[2]);
 			
 		} else {
 			char temp[1024];
 			fgets(temp, sizeof(temp), file);
 		}
 	}
-	
-	for (uint32_t i = 0; i < vertex_indices.size(); i++) {
-		uint32_t vertex_index = vertex_indices[i];
-		uint32_t coords_index = coords_indices[i];
-		
-		glm::vec3 vertex = temp_vertices[vertex_index - 1];
-		glm::vec2 coords = temp_coords  [coords_index - 1];
-		
-		out_vertices.push_back(vertex);
-		out_coords  .push_back(coords);
-	}
-	
+
 	return false;
 }
 
 bool is_near(float x, float y) {
-	return fabs(x - y) < 0.01f;
+	return fabs(x - y) < 1.f;
 }
 
 struct packed_vertex_s {
@@ -179,6 +159,7 @@ int main(int argc, char* argv[]) {
 	
 	std::vector<glm::vec3> vertices;
 	std::vector<glm::vec2> coords;
+	std::vector<uint32_t> indices;
 	
 	ivx_header_t ivx_header;
 	memset(&ivx_header, 0, sizeof(ivx_header));
@@ -187,7 +168,7 @@ int main(int argc, char* argv[]) {
 	ivx_header.version_minor = VERSION_MINOR;
 	
 	printf("Opening OBJ file (%s) ...\n", argv[1]);
-	if (load_obj(argv[1], (char*) ivx_header.name, vertices, coords)) {
+	if (load_obj(argv[1], (char*) ivx_header.name, vertices, coords, indices)) {
 		printf("ERROR An error occured while attempting to read OBJ file\n");
 		return 1;
 		
@@ -195,14 +176,10 @@ int main(int argc, char* argv[]) {
 		printf("Opened OBJ file, indexing ...\n");
 	}
 	
-	std::vector<glm::vec3> indexed_vertices;
-	std::vector<glm::vec2> indexed_coords;
-	
-	std::vector<uint32_t> indices;
-	index_vbo(vertices, coords, indices, indexed_vertices, indexed_coords);
-
-	ivx_header.vertex_count = indexed_vertices.size();
+	ivx_header.vertex_count = vertices.size();
 	ivx_header.index_count = indices.size();
+
+	printf("%ld indices\n", ivx_header.index_count);
 	
 	const char* ivx_path = argc > 2 ? argv[2] : "output.ivx";
 	printf("OBJ file indexed, writing to IVX file (%s) ...\n", ivx_path);
@@ -228,8 +205,8 @@ int main(int argc, char* argv[]) {
 	ivx_header.attributes[0].components = 3;
 	ivx_header.attributes[0].offset = ftell(ivx_file);
 	
-	for (uint64_t i = 0; i < indexed_vertices.size(); i++) {
-		ivx_vec3_t data = { indexed_vertices[i].x, indexed_vertices[i].y, indexed_vertices[i].z };
+	for (uint64_t i = 0; i < vertices.size(); i++) {
+		ivx_vec3_t data = { vertices[i].x, vertices[i].y, vertices[i].z };
 		fwrite(&data, 1, sizeof(data), ivx_file);
 	}
 	
@@ -238,8 +215,8 @@ int main(int argc, char* argv[]) {
 	ivx_header.attributes[1].components = 2;
 	ivx_header.attributes[1].offset = ftell(ivx_file);
 	
-	for (uint64_t i = 0; i < indexed_coords.size(); i++) {
-		ivx_vec2_t data = { indexed_coords[i].x, indexed_coords[i].y };
+	for (uint64_t i = 0; i < coords.size(); i++) {
+		ivx_vec2_t data = { coords[i].x, coords[i].y };
 		fwrite(&data, 1, sizeof(data), ivx_file);
 		
 	}
